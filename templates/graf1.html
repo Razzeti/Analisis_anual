@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Control Financiero Anual</title>
+    <!-- Incluyendo Tailwind CSS para un diseño moderno -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Incluyendo la librería Chart.js para los gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Adaptador de fechas para Chart.js para manejar correctamente los meses -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Usando la fuente Inter de Google Fonts para una mejor tipografía -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Define un tamaño base para los contenedores de los gráficos para que sean responsivos */
+        .chart-container { position: relative; height: 45vh; width: 100%; }
+        /* Estilos para el modo oscuro */
+        .dark body { background-color: #0f172a; color: #e2e8f0; }
+        .dark .card { background-color: #1e293b; border-color: #334155; }
+        .dark .text-header { color: #f8fafc; }
+        .dark .text-subheader { color: #94a3b8; }
+        /* Animación de carga */
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 5px solid #3498db;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            margin-top: -25px;
+            margin-left: -25px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.8);
+            z-index: 9999;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 transition-colors duration-300">
+
+    <!-- Indicador de Carga -->
+    <div id="loading" class="loading-overlay">
+        <div class="text-center">
+            <div class="loader" style="margin: 0 auto 20px;"></div>
+            <p class="text-lg font-semibold text-gray-700">Procesando tus datos financieros...</p>
+            <p class="text-sm text-gray-500">Esto puede tardar un momento.</p>
+        </div>
+    </div>
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="mb-8 flex justify-between items-center">
+            <div>
+                <h1 class="text-3xl md:text-4xl font-bold text-header text-gray-900">Análisis Financiero Anual</h1>
+                <p class="text-md text-subheader text-gray-600 mt-2">Un resumen visual y detallado de tu reporte consolidado.</p>
+            </div>
+        </header>
+
+        <!-- Resumen de Métricas Clave -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="card bg-white p-6 rounded-2xl shadow-lg border border-gray-200">
+                <h2 class="text-lg font-semibold text-subheader">Ingresos Totales (Abonos)</h2>
+                <p id="totalIngresos" class="text-3xl font-bold text-emerald-500 mt-2">S/ 0.00</p>
+            </div>
+            <div class="card bg-white p-6 rounded-2xl shadow-lg border border-gray-200">
+                <h2 class="text-lg font-semibold text-subheader">Gastos Totales (Cargos)</h2>
+                <p id="totalGastos" class="text-3xl font-bold text-red-500 mt-2">S/ 0.00</p>
+            </div>
+            <div class="card bg-white p-6 rounded-2xl shadow-lg border border-gray-200">
+                <h2 class="text-lg font-semibold text-subheader">Balance Neto</h2>
+                <p id="balanceNeto" class="text-3xl font-bold text-gray-700 mt-2">S/ 0.00</p>
+            </div>
+        </div>
+
+        <!-- Gráficos Principales -->
+        <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+            <div class="card bg-white p-6 rounded-2xl shadow-lg border border-gray-200 lg:col-span-3">
+                <h3 class="text-xl font-semibold mb-4 text-header">Evolución Mensual</h3>
+                <div class="chart-container">
+                    <canvas id="evolucionMensualChart"></canvas>
+                </div>
+            </div>
+            <div class="card bg-white p-6 rounded-2xl shadow-lg border border-gray-200 lg:col-span-2">
+                <h3 class="text-xl font-semibold mb-4 text-header">Distribución por Cuenta</h3>
+                <div class="chart-container flex items-center justify-center">
+                    <canvas id="cuentaOrigenChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Gráficos de Top Transacciones -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+            <div class="card bg-white p-6 rounded-2xl shadow-lg border border-gray-200">
+                 <h3 class="text-xl font-semibold mb-4 text-header">Top 5 Orígenes de Ingresos</h3>
+                 <div class="chart-container">
+                     <canvas id="topIngresosChart"></canvas>
+                 </div>
+            </div>
+            <div class="card bg-white p-6 rounded-2xl shadow-lg border border-gray-200">
+                 <h3 class="text-xl font-semibold mb-4 text-header">Top 5 Destinos de Gastos</h3>
+                 <div class="chart-container">
+                     <canvas id="topGastosChart"></canvas>
+                 </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Mostrar el indicador de carga
+    const loadingOverlay = document.getElementById('loading');
+    loadingOverlay.style.display = 'flex';
+
+    // --- 1. OBTENCIÓN DE DATOS DESDE LA API ---
+    fetch('/api/data')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`Error en la red: ${response.statusText}`);
+            }
+            return response.json();
+        })
+        .then(transacciones => {
+            // Una vez que los datos llegan, se esconde el loader y se procesan.
+            loadingOverlay.style.display = 'none';
+            procesarYVisualizarDatos(transacciones);
+        })
+        .catch(error => {
+            console.error('Error al obtener los datos:', error);
+            loadingOverlay.innerHTML = `<div class="text-center"><p class="text-lg font-semibold text-red-600">Error al cargar los datos.</p><p class="text-sm text-gray-500">${error.message}</p></div>`;
+        });
+});
+
+function procesarYVisualizarDatos(transacciones) {
+    // --- 2. PROCESAMIENTO Y ANÁLISIS DE DATOS ---
+    const mesesEs = { 'ENE': 'JAN', 'FEB': 'FEB', 'MAR': 'MAR', 'ABR': 'APR', 'MAY': 'MAY', 'JUN': 'JUN', 'JUL': 'JUL', 'AGO': 'AUG', 'SEP': 'SEP', 'OCT': 'OCT', 'NOV': 'NOV', 'DIC': 'DEC' };
+
+    transacciones.forEach(t => {
+        t.Gastos = parseFloat(t['CARGOS / DEBE']) || 0;
+        t.Ingresos = parseFloat(t['ABONOS / HABER']) || 0;
+
+        const fechaRaw = t.FECHA;
+        const dia = fechaRaw.substring(0, 2);
+        const mesAbbr = fechaRaw.substring(2, 5).toUpperCase();
+        const mesEn = mesesEs[mesAbbr];
+        const anio = 2025;
+
+        t.FechaObj = mesEn ? new Date(`${mesEn} ${dia}, ${anio}`) : null;
+    });
+
+    const transaccionesValidas = transacciones.filter(t => t.FechaObj);
+
+    // --- 3. CÁLCULOS PARA LAS MÉTRICAS Y GRÁFICOS ---
+    const totalIngresos = transaccionesValidas.reduce((sum, t) => sum + t.Ingresos, 0);
+    const totalGastos = transaccionesValidas.reduce((sum, t) => sum + t.Gastos, 0);
+    const balanceNeto = totalIngresos - totalGastos;
+
+    const formatoMoneda = (valor) => valor.toLocaleString('es-PE', { style: 'currency', currency: 'PEN' });
+
+    document.getElementById('totalIngresos').textContent = formatoMoneda(totalIngresos);
+    document.getElementById('totalGastos').textContent = formatoMoneda(totalGastos);
+    const balanceEl = document.getElementById('balanceNeto');
+    balanceEl.textContent = formatoMoneda(balanceNeto);
+    balanceEl.classList.toggle('text-emerald-500', balanceNeto >= 0);
+    balanceEl.classList.toggle('text-red-500', balanceNeto < 0);
+
+    const mensual = {};
+    transaccionesValidas.forEach(t => {
+        const month = t.FechaObj.toISOString().slice(0, 7);
+        if (!mensual[month]) {
+            mensual[month] = { ingresos: 0, gastos: 0 };
+        }
+        mensual[month].ingresos += t.Ingresos;
+        mensual[month].gastos += t.Gastos;
+    });
+    const labelsMensual = Object.keys(mensual).sort();
+    const dataIngresosMensual = labelsMensual.map(m => mensual[m].ingresos);
+    const dataGastosMensual = labelsMensual.map(m => mensual[m].gastos);
+
+    const porCuenta = transaccionesValidas.reduce((acc, t) => {
+        const cuenta = t.CUENTA_ORIGEN || 'Desconocida';
+        if (!acc[cuenta]) {
+            acc[cuenta] = { total: 0 };
+        }
+        acc[cuenta].total += t.Ingresos + t.Gastos;
+        return acc;
+    }, {});
+
+    function getTop5(data, descriptionField, amountField) {
+        const grouped = data.filter(d => d[amountField] > 0).reduce((acc, curr) => {
+            let key = curr[descriptionField];
+            key = key.replace(/Pago YAPE (de|a) \d+/i, 'Pago YAPE a Terceros').trim();
+            key = key.replace(/CLAR\d+/i, 'Servicios (Claro)').trim();
+            key = key.replace(/WOW\d+/i, 'Suscripción (WOW)').trim();
+            key = key.replace(/ABON PLIN-[\w\s\*]+/i, 'Recepción PLIN').trim();
+
+            acc[key] = (acc[key] || 0) + curr[amountField];
+            return acc;
+        }, {});
+        return Object.entries(grouped).sort(([,a],[,b]) => b - a).slice(0, 5);
+    }
+    const topIngresos = getTop5(transaccionesValidas, 'DESCRIPCION', 'Ingresos');
+    const topGastos = getTop5(transaccionesValidas, 'DESCRIPCION', 'Gastos');
+
+    // --- 4. RENDERIZADO DE GRÁFICOS ---
+    Chart.defaults.font.family = "'Inter', sans-serif";
+    Chart.defaults.color = '#64748b';
+
+    new Chart(document.getElementById('evolucionMensualChart'), {
+        type: 'line',
+        data: {
+            labels: labelsMensual,
+            datasets: [
+                { label: 'Ingresos', data: dataIngresosMensual, borderColor: '#10b981', backgroundColor: '#10b98130', fill: true, tension: 0.3, pointBackgroundColor: '#10b981' },
+                { label: 'Gastos', data: dataGastosMensual, borderColor: '#ef4444', backgroundColor: '#ef444430', fill: true, tension: 0.3, pointBackgroundColor: '#ef4444' }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            scales: {
+                x: { type: 'time', time: { unit: 'month', displayFormats: { month: 'MMM yy' } } },
+                y: { ticks: { callback: value => formatoMoneda(value) } }
+            },
+            plugins: { tooltip: { callbacks: { label: (context) => `${context.dataset.label}: ${formatoMoneda(context.parsed.y)}` } } }
+        }
+    });
+
+    new Chart(document.getElementById('cuentaOrigenChart'), {
+        type: 'doughnut',
+        data: {
+            labels: Object.keys(porCuenta),
+            datasets: [{
+                data: Object.values(porCuenta).map(c => c.total),
+                backgroundColor: ['#38bdf8', '#fb923c', '#a78bfa'],
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+                borderWidth: 4,
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom' },
+                tooltip: { callbacks: { label: (context) => `${context.label}: ${formatoMoneda(context.parsed)}` } }
+            }
+        }
+    });
+
+    new Chart(document.getElementById('topIngresosChart'), {
+        type: 'bar',
+        data: {
+            labels: topIngresos.map(item => item[0]),
+            datasets: [{
+                label: 'Monto Total',
+                data: topIngresos.map(item => item[1]),
+                backgroundColor: '#10b98190',
+                borderRadius: 4
+            }]
+        },
+        options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: { x: { ticks: { callback: value => formatoMoneda(value) } } }
+        }
+    });
+
+    new Chart(document.getElementById('topGastosChart'), {
+        type: 'bar',
+        data: {
+            labels: topGastos.map(item => item[0]),
+            datasets: [{
+                label: 'Monto Total',
+                data: topGastos.map(item => item[1]),
+                backgroundColor: '#ef444490',
+                borderRadius: 4
+            }]
+        },
+        options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: { x: { ticks: { callback: value => formatoMoneda(value) } } }
+        }
+    });
+}
+</script>
+</body>
+</html>
