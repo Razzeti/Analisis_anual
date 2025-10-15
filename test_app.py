@@ -2,89 +2,137 @@ import pytest
 from app import app as flask_app
 import os
 import json
+from unittest.mock import patch
 
-# --- Configuración del Entorno de Prueba ---
+# --- Fixtures de Pytest ---
 
 @pytest.fixture
 def client():
     """
-    Crea y configura un cliente de prueba para la aplicación Flask.
-    Este es un 'fixture' de Pytest, lo que significa que se puede pasar a
-    cualquier función de prueba para darle acceso al cliente de la app.
+    Configura la aplicación Flask para pruebas y proporciona un cliente de prueba.
+    Este fixture se ejecuta antes de cada prueba que lo solicita.
     """
-    # Asegurarse de que los archivos de prueba existen antes de ejecutar.
-    # Creamos archivos CSV de entrada falsos para que las pruebas no dependan
-    # de los archivos reales del proyecto.
-    test_yape_csv = "test_yape.csv"
-    test_ahorro_csv = "test_ahorro.csv"
+    # Usar un archivo de reporte final específico para las pruebas
+    reporte_final_prueba = "test_reporte_maestro.csv"
 
-    with open(test_yape_csv, "w") as f:
-        f.write("FECHA;DESCRIPCION;CARGOS / DEBE;ABONOS / HABER\n")
-        f.write("01ENE;Ingreso Yape;0;100\n")
-
-    with open(test_ahorro_csv, "w") as f:
-        f.write("FECHA;DESCRIPCION;CARGOS / DEBE;ABONOS / HABER\n")
-        f.write("01ENE;Gasto Ahorro;50;0\n")
-
-    # Modificamos la configuración de la app para que use nuestros archivos de prueba.
+    # Configuración de la app para el entorno de prueba
     flask_app.config['TESTING'] = True
-    flask_app.config['CSV_YAPE_CONSOLIDADO'] = test_yape_csv
-    flask_app.config['CSV_AHORRO_CONSOLIDADO'] = test_ahorro_csv
-    flask_app.config['REPORTE_FINAL'] = "test_reporte_final.csv"
+    flask_app.config['REPORTE_FINAL'] = reporte_final_prueba
 
+    # Limpiar cualquier archivo de prueba residual antes de empezar
+    if os.path.exists(reporte_final_prueba):
+        os.remove(reporte_final_prueba)
+
+    # El 'yield' pasa el control al código de la prueba
     with flask_app.test_client() as client:
         yield client
 
-    # --- Limpieza después de la prueba ---
-    # Es una buena práctica eliminar los archivos creados para la prueba.
-    os.remove(test_yape_csv)
-    os.remove(test_ahorro_csv)
-    if os.path.exists("test_reporte_final.csv"):
-        os.remove("test_reporte_final.csv")
+    # --- Limpieza post-prueba ---
+    # Este código se ejecuta después de que la prueba ha terminado
+    if os.path.exists(reporte_final_prueba):
+        os.remove(reporte_final_prueba)
+
+def create_dummy_report(path):
+    """Función de ayuda para crear un archivo de reporte falso."""
+    with open(path, "w") as f:
+        f.write("FECHA;DESCRIPCION;CARGOS / DEBE;ABONOS / HABER;CUENTA_ORIGEN\n")
+        f.write("15JUL;Compra online;150.0;0.0;Ahorro\n")
+        f.write("16JUL;Salario;0.0;3500.0;Ahorro\n")
 
 # --- Pruebas de la API ---
 
-def test_api_data_endpoint(client):
+@patch('app.run_data_pipeline')
+def test_get_data_when_file_exists(mock_run_pipeline, client):
     """
-    Prueba el endpoint /api/data para asegurar que responde correctamente.
+    Prueba el endpoint GET /api/data cuando el archivo de reporte ya existe.
+    El pipeline de datos NO debería ejecutarse.
     """
-    print("🧪 Ejecutando prueba para el endpoint /api/data...")
+    print("\n🧪 Prueba: /api/data con archivo existente")
 
-    # Realizamos una petición GET al endpoint /api/data
+    # Preparación: Crear un reporte falso
+    create_dummy_report(flask_app.config['REPORTE_FINAL'])
+
+    # Ejecución: Llamar al endpoint
     response = client.get('/api/data')
 
-    # 1. Verificar que la respuesta es exitosa (código 200)
-    assert response.status_code == 200, f"Se esperaba el código 200 pero se recibió {response.status_code}"
-    print("   -> ✅ Código de estado 200 OK.")
-
-    # 2. Verificar que la respuesta es de tipo JSON
-    assert response.content_type == 'application/json', f"Se esperaba 'application/json' pero se recibió '{response.content_type}'"
-    print("   -> ✅ Content-Type es application/json.")
-
-    # 3. Cargar los datos y verificar que no están vacíos
+    # Verificación
+    assert response.status_code == 200
+    mock_run_pipeline.assert_not_called() # El pipeline no debe ser llamado
     data = json.loads(response.data)
-    assert isinstance(data, list), "La respuesta JSON debería ser una lista."
-    assert len(data) > 0, "La lista de transacciones no debería estar vacía."
-    print(f"   -> ✅ La API devolvió {len(data)} transacciones.")
+    assert len(data) == 2
+    assert data[0]['DESCRIPCION'] == 'Compra online'
+    print("   -> ✅ Éxito: Devuelve datos sin ejecutar el pipeline.")
 
-    # 4. Verificar la estructura del primer elemento
-    #    Esto nos asegura que los datos tienen el formato que el frontend espera.
-    first_transaction = data[0]
-    expected_keys = ['FECHA', 'DESCRIPCION', 'CARGOS / DEBE', 'ABONOS / HABER', 'CUENTA_ORIGEN']
-    for key in expected_keys:
-        assert key in first_transaction, f"La clave esperada '{key}' no se encontró en la transacción."
-    print("   -> ✅ La estructura de datos es correcta.")
+@patch('app.run_data_pipeline')
+def test_get_data_when_file_does_not_exist(mock_run_pipeline, client):
+    """
+    Prueba el endpoint GET /api/data cuando el archivo de reporte NO existe.
+    El pipeline de datos SÍ debería ejecutarse.
+    """
+    print("\n🧪 Prueba: /api/data sin archivo existente")
 
-def test_home_page_endpoint(client):
+    # Configurar el mock para que "cree" el archivo cuando se llame
+    def side_effect():
+        print("   -> Mock de run_data_pipeline llamado. Creando archivo...")
+        create_dummy_report(flask_app.config['REPORTE_FINAL'])
+    mock_run_pipeline.side_effect = side_effect
+
+    # Ejecución: Llamar al endpoint
+    response = client.get('/api/data')
+
+    # Verificación
+    assert response.status_code == 200
+    mock_run_pipeline.assert_called_once() # El pipeline debe ser llamado una vez
+    data = json.loads(response.data)
+    assert len(data) == 2
+    assert data[1]['DESCRIPCION'] == 'Salario'
+    print("   -> ✅ Éxito: Ejecuta el pipeline y devuelve los datos.")
+
+@patch('app.run_data_pipeline')
+def test_refresh_data_endpoint(mock_run_pipeline, client):
     """
-    Prueba que la página principal (/) se carga correctamente.
+    Prueba el endpoint POST /api/data/refresh.
+    Debe forzar la ejecución del pipeline de datos.
     """
-    print("\n🧪 Ejecutando prueba para el endpoint / (página principal)...")
+    print("\n🧪 Prueba: /api/data/refresh")
+
+    # Ejecución: Llamar al endpoint de actualización
+    response = client.post('/api/data/refresh')
+
+    # Verificación
+    assert response.status_code == 200
+    mock_run_pipeline.assert_called_once() # El pipeline debe ser llamado
+    data = json.loads(response.data)
+    assert data['status'] == 'success'
+    print("   -> ✅ Éxito: Endpoint de actualización funciona correctamente.")
+
+def test_home_page_loads_correctly(client):
+    """
+    Prueba que la página de inicio se carga sin errores.
+    """
+    print("\n🧪 Prueba: Carga de la página de inicio (/)")
     response = client.get('/')
+    assert response.status_code == 200
+    assert 'Análisis Financiero Anual'.encode('utf-8') in response.data
+    print("   -> ✅ Éxito: La página de inicio se carga.")
 
-    # Verificar que la página principal responde con éxito
-    assert response.status_code == 200, f"Se esperaba el código 200 pero se recibió {response.status_code}"
+@patch('app.pd.read_csv')
+def test_get_data_handles_read_error(mock_read_csv, client):
+    """
+    Prueba cómo maneja el endpoint /api/data un error al leer el CSV.
+    """
+    print("\n🧪 Prueba: Manejo de errores en /api/data")
 
-    # Verificar que el contenido parece ser HTML
-    assert b'Panel de Control Financiero Anual' in response.data, "El título no se encontró en la página principal."
-    print("   -> ✅ Página principal cargada correctamente.")
+    # Preparación: Crear el archivo, pero hacer que la lectura falle
+    create_dummy_report(flask_app.config['REPORTE_FINAL'])
+    mock_read_csv.side_effect = Exception("Fallo de lectura simulado")
+
+    # Ejecución
+    response = client.get('/api/data')
+
+    # Verificación
+    assert response.status_code == 500
+    data = json.loads(response.data)
+    assert 'error' in data
+    assert 'Fallo de lectura simulado' in data['error']
+    print("   -> ✅ Éxito: La API maneja correctamente los errores de lectura.")

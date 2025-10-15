@@ -2,68 +2,85 @@ from flask import Flask, jsonify, render_template
 import pandas as pd
 import os
 
-# Importar las funciones de los scripts de procesamiento.
-# Esto es mucho más limpio que llamar a los scripts como procesos separados.
+# Importar las funciones de los scripts de procesamiento
 from procesador_anual import procesar_carpeta_de_pdfs
 from unificador import unificar_y_conciliar_reportes
 
 # Crear una instancia de la aplicación Flask
 app = Flask(__name__, template_folder='templates')
 
-# --- Constantes de Configuración ---
-# Se definen aquí para que sea fácil cambiarlas en el futuro.
-CARPETA_YAPE_PDFS = "yape"
-CARPETA_AHORRO_PDFS = "ahorros"
-CSV_YAPE_CONSOLIDADO = "reporte_anual_consolidado.csv"
-CSV_AHORRO_CONSOLIDADO = "reporte_anual_consolidado_AHORRO.csv"
-REPORTE_FINAL = "reporte_maestro_limpio.csv"
+# --- Configuración por Defecto ---
+# Se establecen valores predeterminados que pueden ser sobreescritos
+# durante las pruebas o en diferentes entornos.
+app.config.from_mapping(
+    CARPETA_YAPE_PDFS="yape",
+    CARPETA_AHORRO_PDFS="ahorros",
+    CSV_YAPE_CONSOLIDADO="reporte_anual_consolidado.csv",
+    CSV_AHORRO_CONSOLIDADO="reporte_anual_consolidado_AHORRO.csv",
+    REPORTE_FINAL="reporte_maestro_limpio.csv"
+)
 
 @app.route('/')
 def home():
-    """
-    Sirve la página principal del dashboard (graf1.html).
-    """
+    """Sirve la página principal del dashboard (graf1.html)."""
     return render_template('graf1.html')
+
+def run_data_pipeline():
+    """
+    Ejecuta el pipeline completo de procesamiento de datos, utilizando la
+    configuración de la aplicación actual.
+    """
+    print("🚀 Iniciando pipeline de datos...")
+
+    # Usar la configuración de la app en lugar de constantes globales
+    procesar_carpeta_de_pdfs(
+        app.config['CARPETA_YAPE_PDFS'],
+        app.config['CSV_YAPE_CONSOLIDADO']
+    )
+    procesar_carpeta_de_pdfs(
+        app.config['CARPETA_AHORRO_PDFS'],
+        app.config['CSV_AHORRO_CONSOLIDADO']
+    )
+    unificar_y_conciliar_reportes(
+        app.config['CSV_YAPE_CONSOLIDADO'],
+        app.config['CSV_AHORRO_CONSOLIDADO'],
+        app.config['REPORTE_FINAL']
+    )
+
+    print("✅ Pipeline de datos completado.")
 
 @app.route('/api/data')
 def get_data():
     """
-    Punto de API que ejecuta todo el pipeline de procesamiento de datos:
-    1. Procesa los PDFs de Yape.
-    2. Procesa los PDFs de Ahorro.
-    3. Unifica y limpia los datos.
-    4. Devuelve el resultado como JSON.
+    Devuelve los datos financieros. Si el reporte no existe, ejecuta el pipeline.
     """
-    print("🚀 Petición recibida en /api/data. Iniciando pipeline de datos...")
+    print("Petición recibida en /api/data.")
+    reporte_final = app.config['REPORTE_FINAL']
 
-    # --- Paso 1: Procesar PDFs de la cuenta Yape ---
-    print(f"   -> Procesando PDFs de '{CARPETA_YAPE_PDFS}'...")
-    procesar_carpeta_de_pdfs(CARPETA_YAPE_PDFS, CSV_YAPE_CONSOLIDADO)
+    if not os.path.exists(reporte_final):
+        print(f"   -> No se encontró '{reporte_final}'. Ejecutando el pipeline...")
+        run_data_pipeline()
 
-    # --- Paso 2: Procesar PDFs de la cuenta de Ahorros ---
-    print(f"   -> Procesando PDFs de '{CARPETA_AHORRO_PDFS}'...")
-    procesar_carpeta_de_pdfs(CARPETA_AHORRO_PDFS, CSV_AHORRO_CONSOLIDADO)
-
-    # --- Paso 3: Unificar y conciliar ambos reportes ---
-    print("   -> Unificando y conciliando reportes...")
-    unificar_y_conciliar_reportes(CSV_YAPE_CONSOLIDADO, CSV_AHORRO_CONSOLIDADO, REPORTE_FINAL)
-
-    # --- Paso 4: Leer el reporte final y enviarlo como JSON ---
-    print(f"   -> Leyendo reporte final '{REPORTE_FINAL}' para la respuesta.")
-    if not os.path.exists(REPORTE_FINAL):
-        print(f"   -> ❌ Error: No se encontró el archivo '{REPORTE_FINAL}'.")
-        return jsonify({"error": "El archivo de reporte final no fue encontrado."}), 500
-
+    print(f"   -> Leyendo reporte final '{reporte_final}' para la respuesta.")
     try:
-        df = pd.read_csv(REPORTE_FINAL, sep=';')
-        # Convertir el DataFrame a una lista de diccionarios (formato JSON)
+        df = pd.read_csv(reporte_final, sep=';')
         data = df.to_dict(orient='records')
-        print("   -> ✅ Datos procesados y listos para enviar.")
+        print("   -> Datos listos para enviar.")
         return jsonify(data)
+    except FileNotFoundError:
+        msg = f"El archivo '{reporte_final}' no se encontró incluso después de ejecutar el pipeline."
+        print(f"   -> ❌ Error: {msg}")
+        return jsonify({"error": msg}), 500
     except Exception as e:
         print(f"   -> ❌ Error: Ocurrió un error al leer o convertir el CSV final: {e}")
         return jsonify({"error": f"Error al leer el archivo CSV: {e}"}), 500
 
+@app.route('/api/data/refresh', methods=['POST'])
+def refresh_data():
+    """Forza la re-ejecución de todo el pipeline de datos."""
+    print("Petición recibida en /api/data/refresh. Forzando actualización...")
+    run_data_pipeline()
+    return jsonify({"status": "success", "message": "Los datos han sido actualizados."})
+
 if __name__ == '__main__':
-    # Se especifica el puerto 5001 para evitar conflictos con otros servicios
     app.run(debug=True, port=5001)
