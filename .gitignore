@@ -1,5 +1,0 @@
-# Ignorar archivos de configuración de IDE
-ahorros/*
-yape/*
-!yape/.gitkeep
-!ahorros/.gitkeep
