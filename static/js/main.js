@@ -222,6 +222,107 @@ document.addEventListener('DOMContentLoaded', function() {
             })
         };
         activeCharts.push(...Object.values(charts));
+
+        analizarGastosDetalladamente(transaccionesValidas, totalGastos);
+
+    }
+
+    function analizarGastosDetalladamente(transacciones, totalGastosGeneral) {
+        const contenedor = document.getElementById('analisis-gastos-detallado');
+        if (!contenedor) return;
+        contenedor.innerHTML = '';
+
+        const formatoMoneda = (valor) => valor.toLocaleString('es-PE', { style: 'currency', currency: 'PEN' });
+
+        const reglasCategorias = {
+            'Servicios Básicos': /pago de servicio|luz del sur|sedapal|calidda|movistar|claro|entel|directv/i,
+            'Transporte': /beat|uber|cabify|didi|peaje|pasaje|transporte/i,
+            'Comida y Restaurantes': /restaurante|cafe|pardo's chicken|kfc|mcdonald's|starbucks|chifa|comida|mercado|plaza vea|wong|metro|tottus|vivanda/i,
+            'Suscripciones y Digital': /netflix|spotify|disney+|hbo max|prime video|google|microsoft|apple|wow/i,
+            'Salud': /farmacia|doctor|clínica|salud|botica/i,
+            'Compras': /ripley|saga falabella|h&m|zara|compras|tienda|mall|jockey plaza/i,
+            'Transferencias y Retiros': /transferencia a|retiro en|envío a/i,
+            'Otros Gastos': /./
+        };
+
+        let gastosPorCategoria = {};
+
+        transacciones.filter(t => t.Gastos > 0).forEach(t => {
+            let categoriaAsignada = 'Otros Gastos';
+            for (const categoria in reglasCategorias) {
+                if (reglasCategorias[categoria].test(t.DESCRIPCION)) {
+                    categoriaAsignada = categoria;
+                    break;
+                }
+            }
+            if (!gastosPorCategoria[categoriaAsignada]) {
+                gastosPorCategoria[categoriaAsignada] = [];
+            }
+            gastosPorCategoria[categoriaAsignada].push(t);
+        });
+
+        let analisisHTML = '<div class="space-y-8">';
+
+        // 1. Acumulación de Dinero por Destino
+        analisisHTML += '<div>';
+        analisisHTML += '<h3 class="text-xl font-semibold text-gray-800 mb-3">Acumulación de Gastos por Categoría</h3>';
+        analisisHTML += '<ul class="space-y-2 text-gray-700">';
+        Object.entries(gastosPorCategoria).sort(([, a], [, b]) => b.reduce((s, t) => s + t.Gastos, 0) - a.reduce((s, t) => s + t.Gastos, 0)).forEach(([categoria, gastos]) => {
+            const totalCategoria = gastos.reduce((sum, t) => sum + t.Gastos, 0);
+            const porcentaje = (totalCategoria / totalGastosGeneral) * 100;
+            analisisHTML += `<li class="flex justify-between items-center bg-gray-100 p-3 rounded-lg">
+                <span>${categoria}</span>
+                <span class="font-medium">${formatoMoneda(totalCategoria)} (${porcentaje.toFixed(2)}%)</span>
+            </li>`;
+        });
+        analisisHTML += '</ul></div>';
+
+        // 2. Valores Extraños (Anomalías)
+        const mediaGeneral = totalGastosGeneral / transacciones.filter(t => t.Gastos > 0).length;
+        const desviacionEstandar = Math.sqrt(transacciones.filter(t => t.Gastos > 0).reduce((sum, t) => sum + Math.pow(t.Gastos - mediaGeneral, 2), 0) / transacciones.length);
+        const umbralAnomalia = mediaGeneral + (2 * desviacionEstandar); // Umbral: media + 2 * stddev
+        const gastosAnomalos = transacciones.filter(t => t.Gastos > umbralAnomalia);
+
+        if (gastosAnomalos.length > 0) {
+            analisisHTML += '<div>';
+            analisisHTML += `<h3 class="text-xl font-semibold text-gray-800 mb-3">Posibles Gastos Atípicos (Mayores a ${formatoMoneda(umbralAnomalia)})</h3>`;
+            analisisHTML += '<ul class="space-y-2">';
+            gastosAnomalos.sort((a,b) => b.Gastos - a.Gastos).forEach(g => {
+                analisisHTML += `<li class="p-3 bg-yellow-100 border-l-4 border-yellow-400 rounded">
+                    <p class="font-semibold">${g.DESCRIPCION}</p>
+                    <p class="text-sm text-gray-600">${g.FECHA} - <span class="font-bold text-yellow-800">${formatoMoneda(g.Gastos)}</span></p>
+                </li>`;
+            });
+            analisisHTML += '</ul></div>';
+        }
+
+        // 3. Recomendaciones y Niveles de Mejora
+        analisisHTML += '<div>';
+        analisisHTML += '<h3 class="text-xl font-semibold text-gray-800 mb-3">Recomendaciones y Oportunidades de Mejora</h3>';
+        analisisHTML += '<div class="space-y-3">';
+        const categoriaMasCara = Object.entries(gastosPorCategoria).sort(([, a], [, b]) => b.reduce((s, t) => s + t.Gastos, 0) - a.reduce((s, t) => s + t.Gastos, 0))[0];
+        if (categoriaMasCara) {
+             const totalCategoria = categoriaMasCara[1].reduce((s, t) => s + t.Gastos, 0);
+             const porcentaje = (totalCategoria / totalGastosGeneral) * 100;
+             analisisHTML += `<div class="p-4 bg-blue-100 border-l-4 border-blue-400 rounded">
+                <h4 class="font-bold text-blue-800">Foco Principal: ${categoriaMasCara[0]}</h4>
+                <p class="text-gray-700">Has gastado ${formatoMoneda(totalCategoria)}, que representa el ${porcentaje.toFixed(2)}% de tus gastos totales. Revisa las transacciones en esta categoría para identificar posibles ahorros.</p>
+             </div>`;
+        }
+        const suscripciones = gastosPorCategoria['Suscripciones y Digital'];
+        if (suscripciones && suscripciones.length > 1) {
+            const totalSuscripciones = suscripciones.reduce((s, t) => s + t.Gastos, 0);
+            analisisHTML += `<div class="p-4 bg-indigo-100 border-l-4 border-indigo-400 rounded">
+                <h4 class="font-bold text-indigo-800">Revisa tus Suscripciones</h4>
+                <p class="text-gray-700">Detectamos ${suscripciones.length} gastos en suscripciones y servicios digitales por un total de ${formatoMoneda(totalSuscripciones)}. ¿Sigues usando todos estos servicios?</p>
+            </div>`;
+        }
+        analisisHTML += '</div></div>';
+
+
+        analisisHTML += '</div>'; // Cierre del contenedor principal
+
+        contenedor.innerHTML = analisisHTML;
     }
 
     refreshButton.addEventListener('click', refreshData);
